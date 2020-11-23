@@ -66,26 +66,31 @@ class GSheetsParser:
 
     def parseFeed(self, feed):
         range_ = feed[0]
+        print(range_)
         url    = feed[1]
-
+        print(feed)
         latestTime = self.getLatestTime(range_, url)
         
         print(latestTime)
 
         d = feedparser.parse(url)
+        print(d['entries'])
+        print(self.get_keywords("asd f asd molten salt spot blind spot exciting overrated", feed[2:]))
         for entry in d['entries']:
             print('')
+            entry_data={}
+
             linkStart = entry['link'].find('url=')
             linkEnd = entry['link'].rfind('&ct')
-            link = entry['link'][linkStart + 4:linkEnd]
-            print(link)
+            entry_data['link'] = entry['link'][linkStart + 4:linkEnd]
+            print(entry_data['link'])
 
             hyphen = entry['published'].find('-')
-            year = entry['published'][:hyphen]
+            entry_data['year'] = entry['published'][:hyphen]
             rest = entry['published'][hyphen + 1:]
             hyphen = rest.find('-')
-            month = rest[:hyphen]
-            day = rest[hyphen + 1:rest.find('T')]
+            entry_data['month'] = rest[:hyphen]
+            entry_data['day'] = rest[hyphen + 1:rest.find('T')]
             time = rest[rest.find('T') + 1 : -1]
             if(entry['published'] <= latestTime):
                 print('continue')
@@ -94,7 +99,7 @@ class GSheetsParser:
             #print(entry)
 
             try:
-                html1 = requests.get(link, timeout=5)
+                html1 = requests.get(entry_data['link'], timeout=5)
                 html = html1.content
                 soup = BeautifulSoup(html, features='lxml')
                 texts = soup.findAll(text=True)
@@ -104,21 +109,52 @@ class GSheetsParser:
                 print('bad request')
                 text = 'bad request'
             print('text')
-            value_range_body = {
-                "range": 'small modular reactor',
-                "majorDimension": 'ROWS',
-                "values": [
-                    [entry['title'], link, entry['published'], year, month, day]
-                ]
-            }
-            request = self.service.spreadsheets().values().append(spreadsheetId=spreadsheetId, range=range_, valueInputOption=value_input_option, insertDataOption=insert_data_option, body=value_range_body)
-            response = request.execute()
-            print(response)
+
+            entry_data['title']     = entry['title']
+            entry_data['published'] = entry['published']
+            entry['keywords'] = self.get_keywords(text, feed[2:])
+            self.save(range_, entry_data)
+
+    def get_keywords(self, text, keyword_data):
+        print(text)
+        keyword_counts = []
+        keywords = keyword_data[0].split(',')
+        keywords = [keyword.strip() for keyword in keywords]
+        print(keywords)
+        #first column s set of individual keywords
+        for keyword in keywords:
+            keyword_counts.append(text.count(keyword))
+
+        #other columns are groupings that share count
+        for keyword_grouping in keyword_data[1:]:
+            count = 0
+            print(keyword_grouping)
+            keyword_grouping = keyword_grouping.split(',')
+            keyword_grouping = [keyword.strip() for keyword in keyword_grouping]
+            for keyword in keyword_grouping:
+                if(keyword == ''): continue
+                count = count + text.count(keyword)
+            keyword_counts.append(count)
+
+        return keyword_counts
+
+    def save(self, range_, entry_data):
+        values = [entry_data['title'], entry_data['link'], entry_data['published'], entry_data['year'], entry_data['month'], entry_data['day']]
+        values.append(entry_data['keywords'])
+        value_range_body = {
+            "range": range_,
+            "majorDimension": 'ROWS',
+            "values": values
+        }
+        request = self.service.spreadsheets().values().append(spreadsheetId=spreadsheetId, range=range_, valueInputOption=value_input_option, insertDataOption=insert_data_option, body=value_range_body)
+        response = request.execute()
+        print(response)
 
     def getFeeds(self, range_):
         rows = self.service.spreadsheets().values().get(spreadsheetId=spreadsheetId, range=range_).execute()
-        futures = {executor.submit(self.parseFeed, feed): feed for feed in rows['values']}
-        concurrent.futures.wait(futures)
+        #futures = {executor.submit(self.parseFeed, feed): feed for feed in rows['values']}
+        #concurrent.futures.wait(futures)
+        self.parseFeed(rows['values'][0])
 
 
 def main():
